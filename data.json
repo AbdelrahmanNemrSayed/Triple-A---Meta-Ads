@@ -1,0 +1,61 @@
+{
+  "settings": {
+    "metaAccessToken": "EAAWxF61ZARPIBRdTgvkZA4smcxBTV1SenuCaUkhE50gZAv8k0x6SIe8ZCESYdkB9MDoBUhjl9aOqzoUOy6ZCJlnvLpwqthxC8KLpj6RmN504JFTkDUZAOEjShMWy6VPxukmjkyUgywmDPkQOtwwrZC3YpajWWm068Lqj3VuP04ZAahS4Xwhix9OOZCU57M2dHIZBJAxXaZA6WAzxnaZAXcAVdTcqjnZBVsQ4kAouZBKgnf0IuD7e82HfR8jqYu9dCmkYEBFfRGEvHfhHrZB4909g2YLnO1EdZBNhJgZDZD",
+    "metaAdAccountId": "26739674035671488",
+    "metaAdAccountsList": [
+      {
+        "id": "26739674035671488",
+        "name": "HBrand"
+      },
+      {
+        "id": "965194625872456",
+        "name": "HForLess"
+      }
+    ],
+    "telegramBotToken": "8929692487:AAH7yguXGEJfUu3WInpaIVmsavm3XA4pfrQ",
+    "telegramChatId": "",
+    "googleSheetId": "https://script.google.com/macros/s/AKfycbxHt1XArpYEy_0SMBSXist-iVdAiaBtKayjl7lCYS3uboP3IYvG6W0bjZraKSmcd0Q/exec",
+    "checkInterval": "30",
+    "currency": "EGP",
+    "currencySymbol": "ج.م"
+  },
+  "rules": [
+    {
+      "id": "rule_1",
+      "name": "إيقاف الإعلانات الضعيفة تلقائياً",
+      "description": "إيقاف الإعلان فوراً إذا تجاوزت تكلفة العميل المحتمل 150 ج.م وتم صرف 450 ج.م كحد أدنى",
+      "targetType": "ad",
+      "metric": "cpa",
+      "operator": "greater_than",
+      "threshold": 150,
+      "minSpent": 450,
+      "action": "pause",
+      "isActive": true,
+      "lastExecuted": "2026-05-15T14:09:10.994Z"
+    },
+    {
+      "id": "rule_2",
+      "name": "زيادة الميزانية ذكياً (Smart Scale)",
+      "description": "زيادة ميزانية المجموعة الإعلانية بنسبة 10% إذا كان سعر العميل أقل من 75 ج.م وحقق 3 تحويلات على الأقل",
+      "targetType": "adset",
+      "metric": "cpa",
+      "operator": "less_than",
+      "threshold": 75,
+      "minLeads": 3,
+      "action": "increase_budget",
+      "percentValue": 10,
+      "isActive": true,
+      "lastExecuted": "2026-05-15T23:01:54.909Z"
+    },
+    {
+      "id": "rule_3",
+      "name": "التقرير التلقائي اليومي",
+      "description": "استخراج ملخص الأداء اليومي وإرساله تلقائياً إلى تيليجرام وحفظه في السجلات",
+      "targetType": "account",
+      "action": "send_report",
+      "scheduleTime": "21:00",
+      "isActive": true,
+      "lastExecuted": "2026-05-15T18:01:07.442Z"
+    }
+  ]
+}

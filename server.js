@@ -173,85 +173,77 @@ function addLog(type, message) {
   console.log(`[${type.toUpperCase()}] ${message}`);
 }
 
-function loadLeads() {
-  if (!fs.existsSync(LEADS_FILE)) {
-    const defaultLeads = [
-      {
-        id: 'lead_1',
-        name: 'أحمد محمود العشري',
-        phone: '+201067451239',
-        product: 'تيشيرت كاجوال بولو قطن 100%',
-        brand: 'HBrand',
-        timestamp: new Date(Date.now() - 1000 * 60 * 15).toISOString(), // 15 mins ago
-        status: 'جديد'
-      },
-      {
-        id: 'lead_2',
-        name: 'كريم عبد العزيز النجار',
-        phone: '+201124589632',
-        product: 'حذاء كلاسيك جلد طبيعي أسود فاخر',
-        brand: 'HBrand',
-        timestamp: new Date(Date.now() - 1000 * 60 * 45).toISOString(), // 45 mins ago
-        status: 'تم التواصل'
-      },
-      {
-        id: 'lead_3',
-        name: 'مي الشافعي عبد الله',
-        phone: '+201278451269',
-        product: 'تيشيرت تصفية كبرى صيفية قطعتين',
-        brand: 'HForLess',
-        timestamp: new Date(Date.now() - 1000 * 60 * 120).toISOString(), // 2 hours ago
-        status: 'مهتم'
-      },
-      {
-        id: 'lead_4',
-        name: 'يوسف هاني عبد العال',
-        phone: '+201552369874',
-        product: 'حذاء ركض رياضي رمادي خفيف',
-        brand: 'HForLess',
-        timestamp: new Date(Date.now() - 1000 * 60 * 300).toISOString(), // 5 hours ago
-        status: 'تم البيع'
-      },
-      {
-        id: 'lead_5',
-        name: 'رنا أحمد يسري',
-        phone: '+201025478965',
-        product: 'تيشيرت صيفي أوفر سايز بيج',
-        brand: 'HBrand',
-        timestamp: new Date(Date.now() - 1000 * 60 * 420).toISOString(), // 7 hours ago
-        status: 'مهتم'
-      },
-      {
-        id: 'lead_6',
-        name: 'محمود عبد السلام القاضي',
-        phone: '+201147859632',
-        product: 'حذاء كلاسيك بني فاخر للأعراس',
-        brand: 'HBrand',
-        timestamp: new Date(Date.now() - 1000 * 60 * 720).toISOString(), // 12 hours ago
-        status: 'جديد'
-      },
-      {
-        id: 'lead_7',
-        name: 'إبراهيم حسن جلال',
-        phone: '+201225412589',
-        product: 'طقم تيشرتات التوفير الذكي 3 قطع',
-        brand: 'HForLess',
-        timestamp: new Date(Date.now() - 1000 * 60 * 1440).toISOString(), // 1 day ago
-        status: 'تم التواصل'
-      }
-    ];
-    fs.writeFileSync(LEADS_FILE, JSON.stringify(defaultLeads, null, 2), 'utf-8');
-    return defaultLeads;
-  }
+async function loadLeads() {
   try {
-    return JSON.parse(fs.readFileSync(LEADS_FILE, 'utf-8'));
+    const leads = await Lead.find().sort({ timestamp: -1 });
+    if (leads.length === 0) {
+      const defaultLeads = [
+        {
+          name: 'أحمد محمود العشري',
+          phone: '+201067451239',
+          product: 'تيشيرت كاجوال بولو قطن 100%',
+          brand: 'HBrand',
+          status: 'جديد'
+        },
+        {
+          name: 'كريم عبد العزيز النجار',
+          phone: '+201124589632',
+          product: 'حذاء كلاسيك جلد طبيعي أسود فاخر',
+          brand: 'HBrand',
+          status: 'تم التواصل'
+        },
+        {
+          name: 'مي الشافعي عبد الله',
+          phone: '+201278451269',
+          product: 'تيشيرت تصفية كبرى صيفية قطعتين',
+          brand: 'HForLess',
+          status: 'مهتم'
+        },
+        {
+          name: 'يوسف هاني عبد العال',
+          phone: '+201552369874',
+          product: 'حذاء ركض رياضي رمادي خفيف',
+          brand: 'HForLess',
+          status: 'تم البيع'
+        },
+        {
+          name: 'رنا أحمد يسري',
+          phone: '+201025478965',
+          product: 'تيشيرت صيفي أوفر سايز بيج',
+          brand: 'HBrand',
+          status: 'مهتم'
+        },
+        {
+          name: 'محمود عبد السلام القاضي',
+          phone: '+201147859632',
+          product: 'حذاء كلاسيك بني فاخر للأعراس',
+          brand: 'HBrand',
+          status: 'جديد'
+        },
+        {
+          name: 'إبراهيم حسن جلال',
+          phone: '+201225412589',
+          product: 'طقم تيشرتات التوفير الذكي 3 قطع',
+          brand: 'HForLess',
+          status: 'تم التواصل'
+        }
+      ];
+      const created = await Lead.insertMany(defaultLeads);
+      return created.map(l => {
+        const obj = l.toObject();
+        obj.id = l._id.toString();
+        return obj;
+      });
+    }
+    return leads.map(l => {
+      const obj = l.toObject();
+      obj.id = l._id.toString();
+      return obj;
+    });
   } catch (err) {
+    console.error('Failed to load leads from MongoDB:', err.message);
     return [];
   }
-}
-
-function saveLeads(leads) {
-  fs.writeFileSync(LEADS_FILE, JSON.stringify(leads, null, 2), 'utf-8');
 }
 
 // --- Custom Live Multi-Account Simulator ---
@@ -1664,8 +1656,8 @@ app.post('/api/ai/chat', authenticateToken, async (req, res) => {
   if (!message) return res.status(400).json({ error: 'Message is required' });
 
   try {
-    const data = loadData();
-    const leads = loadLeads();
+    const data = await loadData();
+    const leads = await Lead.find();
     
     // Gather context for AI
     const targetAccountId = accountId || data.settings.metaAdAccountId;
@@ -1699,7 +1691,7 @@ app.post('/api/ai/chat', authenticateToken, async (req, res) => {
 
 // POST: Interactive Notification Test Endpoint
 app.post('/api/notifications/test', async (req, res) => {
-  const data = loadData();
+  const data = await loadData();
   const { settings } = data;
   const { telegramBotToken, telegramChatId, notificationEmail } = req.body;
   
@@ -1724,21 +1716,28 @@ app.post('/api/notifications/test', async (req, res) => {
 });
 
 // POST: Update lead follow-up status
-app.post('/api/leads/status', (req, res) => {
+app.post('/api/leads/status', async (req, res) => {
   const { leadId, status } = req.body;
   if (!leadId || !status) {
     return res.status(400).json({ error: 'مطلوب معرّف العميل والحالة الجديدة!' });
   }
-
+  
   try {
-    const leads = loadLeads();
-    const idx = leads.findIndex(l => l.id === leadId);
-    if (idx !== -1) {
-      const oldStatus = leads[idx].status;
-      leads[idx].status = status;
-      saveLeads(leads);
-      addLog('system', `تم تغيير حالة العميل "${leads[idx].name}" من (${oldStatus}) إلى (${status}).`);
-      return res.json({ success: true, leads });
+    const lead = await Lead.findById(leadId);
+    if (lead) {
+      const oldStatus = lead.status;
+      lead.status = status;
+      await lead.save();
+      addLog('system', `تم تغيير حالة العميل "${lead.name}" من (${oldStatus}) إلى (${status}).`);
+      
+      const allLeads = await Lead.find().sort({ timestamp: -1 });
+      const plainLeads = allLeads.map(l => {
+        const obj = l.toObject();
+        obj.id = l._id.toString();
+        return obj;
+      });
+      
+      return res.json({ success: true, leads: plainLeads });
     }
     res.status(404).json({ error: 'العميل غير موجود!' });
   } catch (err) {

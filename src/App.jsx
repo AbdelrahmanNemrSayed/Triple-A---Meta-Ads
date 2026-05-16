@@ -56,7 +56,7 @@ function App() {
   const [isTriggering, setIsTriggering] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [activeAccordion, setActiveAccordion] = useState({});
-  const [targetRegion, setTargetRegion] = useState("SA");
+  const [targetRegion, setTargetRegion] = useState("EG");
   const regions = {
     SA: { name: "السعودية", currency: "SAR", symbol: "ر.س", flag: "🇸🇦" },
     EG: { name: "مصر", currency: "EGP", symbol: "ج.م", flag: "🇪🇬" },
@@ -161,7 +161,7 @@ function App() {
 
   useEffect(() => {
     fetchData();
-  }, []);
+  }, [targetRegion]);
 
   useEffect(() => {
     if (!activeAccountId) return;
@@ -175,7 +175,7 @@ function App() {
       );
     }, 10000);
     return () => clearInterval(interval);
-  }, [activeAccountId]);
+  }, [activeAccountId, targetRegion]);
 
   // Scroll to bottom of terminal when logs update
   useEffect(() => {

@@ -16,6 +16,7 @@ import Lead from './models/Lead.js';
 import Rule from './models/Rule.js';
 import Log from './models/Log.js';
 import User from './models/User.js';
+import Setting from './models/Setting.js';
 import { getAiConsultantResponse } from './aiService.js';
 
 dotenv.config();
@@ -94,8 +95,8 @@ const DATA_FILE = path.join(__dirname, 'data.json');
 const LOGS_FILE = path.join(__dirname, 'logs.json');
 const LEADS_FILE = path.join(__dirname, 'leads.json');
 
-// --- Helper Functions to Load/Save Data ---
-function loadData() {
+// --- Helper Functions to Load/Save Data (MongoDB) ---
+async function loadData() {
   const defaultData = {
     settings: {
       metaAccessToken: process.env.META_ACCESS_TOKEN || '',
@@ -116,106 +117,59 @@ function loadData() {
       smtpUser: '',
       smtpPass: ''
     },
-    rules: [
-      {
-        id: 'rule_1',
-        name: 'إيقاف الإعلانات الضعيفة تلقائياً',
-        description: 'إيقاف الإعلان فوراً إذا تجاوزت تكلفة العميل المحتمل 150 ج.م وتم صرف 450 ج.م كحد أدنى',
-        targetType: 'ad',
-        metric: 'cpa',
-        operator: 'greater_than',
-        threshold: 150.0,
-        minSpent: 450.0,
-        action: 'pause',
-        isActive: true,
-        lastExecuted: null
-      },
-      {
-        id: 'rule_2',
-        name: 'زيادة الميزانية ذكياً (Smart Scale)',
-        description: 'زيادة ميزانية المجموعة الإعلانية بنسبة 10% إذا كان سعر العميل أقل من 75 ج.م وحقق 3 تحويلات على الأقل',
-        targetType: 'adset',
-        metric: 'cpa',
-        operator: 'less_than',
-        threshold: 75.0,
-        minLeads: 3,
-        action: 'increase_budget',
-        percentValue: 10,
-        isActive: true,
-        lastExecuted: null
-      },
-      {
-        id: 'rule_3',
-        name: 'التقرير التلقائي اليومي',
-        description: 'استخراج ملخص الأداء اليومي وإرساله تلقائياً إلى تيليجرام وحفظه في السجلات',
-        targetType: 'account',
-        action: 'send_report',
-        scheduleTime: '21:00', // 9:00 PM
-        isActive: true,
-        lastExecuted: null
-      }
-    ]
+    rules: []
   };
 
-  if (!fs.existsSync(DATA_FILE)) {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(defaultData, null, 2), 'utf-8');
-    return defaultData;
-  }
   try {
-    const data = JSON.parse(fs.readFileSync(DATA_FILE, 'utf-8'));
-    // Ensure accounts list exists
-    if (!data.settings.metaAdAccountsList) {
-      data.settings.metaAdAccountsList = defaultData.settings.metaAdAccountsList;
+    let settings = await Setting.findOne();
+    if (!settings) {
+      settings = await Setting.create(defaultData.settings);
     }
-    return data;
+    const rules = await Rule.find();
+    
+    // Convert rules to plain objects to match expected structure
+    const plainRules = rules.map(r => {
+      const obj = r.toObject();
+      obj.id = r._id.toString(); // Map _id to id if frontend expects 'id'
+      return obj;
+    });
+
+    return { settings: settings.toObject(), rules: plainRules };
   } catch (err) {
+    console.error('Failed to load data from MongoDB:', err.message);
     return defaultData;
   }
 }
 
-function saveData(data) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(data, null, 2), 'utf-8');
+async function saveData(data) {
+  try {
+    if (data.settings) {
+      await Setting.findOneAndUpdate({}, data.settings, { upsert: true, new: true });
+    }
+  } catch (err) {
+    console.error('Failed to save data to MongoDB:', err.message);
+  }
 }
 
-function loadLogs() {
-  if (!fs.existsSync(LOGS_FILE)) {
-    const defaultLogs = [
-      {
-        timestamp: new Date().toISOString(),
-        type: 'system',
-        message: 'تم تشغيل نظام أتمتة الإعلانات MetaFlow AI بنجاح.'
-      }
-    ];
-    fs.writeFileSync(LOGS_FILE, JSON.stringify(defaultLogs, null, 2), 'utf-8');
-    return defaultLogs;
-  }
+async function loadLogs() {
   try {
-    return JSON.parse(fs.readFileSync(LOGS_FILE, 'utf-8'));
+    const logs = await Log.find().sort({ timestamp: -1 }).limit(500);
+    return logs.map(l => ({
+      timestamp: l.timestamp ? l.timestamp.toISOString() : new Date().toISOString(),
+      type: l.type,
+      message: l.message
+    }));
   } catch (err) {
+    console.error('Failed to load logs from MongoDB:', err.message);
     return [];
   }
 }
 
-async function addLog(type, message) {
-  // Save to MongoDB
-  try {
-    await Log.create({ type, message });
-  } catch (err) {
+function addLog(type, message) {
+  // Fire and forget save to MongoDB
+  Log.create({ type, message }).catch(err => {
     console.error('Failed to save log to MongoDB:', err.message);
-  }
-
-  const logs = loadLogs();
-  const newLog = {
-    timestamp: new Date().toISOString(),
-    type, // 'system' | 'success' | 'warning' | 'danger' | 'info'
-    message
-  };
-  logs.unshift(newLog); // Add to beginning
-  // Keep last 500 logs
-  if (logs.length > 500) {
-    logs.pop();
-  }
-  fs.writeFileSync(LOGS_FILE, JSON.stringify(logs, null, 2), 'utf-8');
+  });
   console.log(`[${type.toUpperCase()}] ${message}`);
 }
 
@@ -493,7 +447,7 @@ async function sendEmailNotification(recipientEmail, subject, htmlBody) {
   console.log(`[EMAIL SUBJECT]: ${subject}`);
   console.log(`[EMAIL BODY]:\n${htmlBody}`);
 
-  const data = loadData();
+  const data = await loadData();
   const { settings } = data;
 
   try {
@@ -745,7 +699,7 @@ async function getRealLeadsFromMeta(accId, accessToken) {
 }
 
 async function runAutomation() {
-  const data = loadData();
+  const data = await loadData();
   const { settings, rules } = data;
   
   addLog('system', 'بدء فحص القواعد الذكية وجدول الأتمتة المخصص لجميع الحسابات الإعلانية...');
@@ -781,12 +735,22 @@ async function runAutomation() {
         // Fetch Leads
         const realLeads = await getRealLeadsFromMeta(accId, settings.metaAccessToken);
         if (realLeads.length > 0) {
-          const localLeads = loadLeads();
+          const localLeads = await Lead.find();
           // Merge avoiding duplicates by ID
-          const existingIds = new Set(localLeads.map(l => l.id));
+          const existingIds = new Set(localLeads.map(l => l.metaLeadId || l._id.toString()));
           const newLeads = realLeads.filter(l => !existingIds.has(l.id));
           if (newLeads.length > 0) {
-            saveLeads([...newLeads, ...localLeads]);
+            // Map 'id' from Meta to 'metaLeadId' for our schema
+            const leadsToInsert = newLeads.map(l => ({
+              name: l.name,
+              phone: l.phone,
+              email: l.email,
+              product: l.product,
+              brand: l.brand,
+              status: l.status,
+              metaLeadId: l.id
+            }));
+            await Lead.insertMany(leadsToInsert);
             addLog('success', `✅ تم استيراد ${newLeads.length} عملاء حقيقيين جدد من Meta بنجاح.`);
           }
         }
@@ -1014,6 +978,7 @@ async function runAutomation() {
           }
           await appendToGoogleSheet(settings.googleSheetId, rule.name, accName, 'إيقاف مجدول (Night Pause)', `الوقت: ${rule.scheduleTime}`);
           rule.lastExecuted = new Date().toISOString();
+          await Rule.findByIdAndUpdate(rule._id || rule.id, { lastExecuted: rule.lastExecuted });
         }
       }
 
@@ -1066,12 +1031,12 @@ async function runAutomation() {
           }
           await appendToGoogleSheet(settings.googleSheetId, rule.name, accName, 'تشغيل مجدول (Morning Start)', `الوقت: ${rule.scheduleTime}`);
           rule.lastExecuted = new Date().toISOString();
+          await Rule.findByIdAndUpdate(rule._id || rule.id, { lastExecuted: rule.lastExecuted });
         }
       }
     }
   }
 
-  saveData({ ...data, rules });
   addLog('system', `اكتمل فحص القواعد الذكية لجميع الحسابات الإعلانية. الإجراءات المنفذة بالكامل: ${totalActionsTriggered}`);
 }
 
@@ -1082,7 +1047,7 @@ async function runAutomation() {
 app.get('/api/campaigns', async (req, res) => {
   const accountId = req.query.accountId || '26739674035671488';
   const region = req.query.region || 'EG';
-  const data = loadData();
+  const data = await loadData();
   const isMetaConfigured = data.settings.metaAccessToken && accountId;
 
   if (isMetaConfigured) {
@@ -1118,7 +1083,7 @@ app.post('/api/ads/status', async (req, res) => {
   const { accountId, campaignId, adsetId, adId, status } = req.body;
   const activeAccId = accountId || '26739674035671488';
   
-  const data = loadData();
+  const data = await loadData();
   const isMetaConfigured = data.settings.metaAccessToken && data.settings.metaAdAccountId;
 
   const campaigns = mockCampaignsByAccount[activeAccId] || [];
@@ -1151,19 +1116,27 @@ app.post('/api/ads/status', async (req, res) => {
 });
 
 // Get rules and settings
-app.get('/api/rules', (req, res) => {
-  const data = loadData();
-  res.json(data.rules);
+app.get('/api/rules', async (req, res) => {
+  try {
+    const rules = await Rule.find();
+    res.json(rules);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
-app.get('/api/settings', (req, res) => {
-  const data = loadData();
-  res.json(data.settings);
+app.get('/api/settings', async (req, res) => {
+  try {
+    const data = await loadData();
+    res.json(data.settings);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Side-by-side Brand Performance Battle Endpoint
 app.get('/api/brands/compare', async (req, res) => {
-  const data = loadData();
+  const data = await loadData();
   const region = req.query.region || 'EG';
   const results = {};
   const accounts = [
@@ -1238,14 +1211,17 @@ app.get('/api/brands/compare', async (req, res) => {
 });
 
 // Save settings
-app.post('/api/settings', authenticateToken, (req, res) => {
-  const data = loadData();
-  data.settings = { ...data.settings, ...req.body };
-  saveData(data);
-  addLog('system', 'تم حفظ إعدادات التكامل والربط بنجاح.');
-  
-  setupCronJob(data.settings.checkInterval);
-  res.json({ success: true, settings: data.settings });
+app.post('/api/settings', authenticateToken, async (req, res) => {
+  try {
+    const data = await loadData();
+    data.settings = { ...data.settings, ...req.body };
+    await saveData(data);
+    addLog('system', 'تم حفظ إعدادات التكامل والربط بنجاح.');
+    
+    res.json({ success: true, settings: data.settings });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post('/api/ai-image', async (req, res) => {
@@ -1391,11 +1367,11 @@ app.post('/api/settings/discover-accounts', authenticateToken, async (req, res) 
     if (accountsList.length > 0) {
       addLog('success', `✅ تم اكتشاف ${accountsList.length} حساب إعلاني بنجاح على حسابك.`);
       // Save discovered list in settings cache
-      const data = loadData();
+      const data = await loadData();
       data.settings.metaAccessToken = metaAccessToken;
       data.settings.metaAdAccountsList = accountsList;
       data.settings.metaAdAccountId = accountsList[0].id; // Set default to first
-      saveData(data);
+      await saveData(data);
       
       // Inject dummy mock structure in simulation so they can click and view it immediately
       accountsList.forEach(acc => {
@@ -1461,9 +1437,9 @@ app.post('/api/settings/exchange-token', async (req, res) => {
 
     const longLivedToken = response.data.access_token;
     if (longLivedToken) {
-      const data = loadData();
+      const data = await loadData();
       data.settings.metaAccessToken = longLivedToken;
-      saveData(data);
+      await saveData(data);
       addLog('success', '✅ تم تحويل الرمز بنجاح وتحديث فيسبوك Access Token في لوحة التحكم لـ 60 يوماً!');
       return res.json({ success: true, longLivedToken });
     } else {
@@ -1477,39 +1453,92 @@ app.post('/api/settings/exchange-token', async (req, res) => {
 });
 
 // Create/Update Rule
-app.post('/api/rules', authenticateToken, (req, res) => {
-  const data = loadData();
-  const rule = req.body;
-  
-  if (!rule.id) {
-    rule.id = 'rule_' + Date.now();
-    data.rules.push(rule);
-    addLog('system', `تم إنشاء قاعدة أتمتة جديدة بنجاح: "${rule.name}"`);
-  } else {
-    const idx = data.rules.findIndex(r => r.id === rule.id);
-    if (idx !== -1) {
-      data.rules[idx] = rule;
-      addLog('system', `تم تعديل وتحديث قاعدة الأتمتة: "${rule.name}"`);
+app.post('/api/rules', authenticateToken, async (req, res) => {
+  try {
+    const ruleData = req.body;
+    
+    if (!ruleData.id || ruleData.id.startsWith('rule_')) {
+      // Create new rule or handle legacy fake ID
+      const newRule = await Rule.create({
+        name: ruleData.name,
+        description: ruleData.description,
+        targetType: ruleData.targetType,
+        metric: ruleData.metric,
+        operator: ruleData.operator,
+        threshold: ruleData.threshold,
+        minSpent: ruleData.minSpent,
+        minLeads: ruleData.minLeads,
+        action: ruleData.action,
+        percentValue: ruleData.percentValue,
+        isActive: ruleData.isActive
+      });
+      addLog('system', `تم إنشاء قاعدة أتمتة جديدة بنجاح: "${ruleData.name}"`);
     } else {
-      data.rules.push(rule);
+      // Update existing rule by MongoDB _id
+      await Rule.findByIdAndUpdate(ruleData.id, ruleData);
+      addLog('system', `تم تعديل وتحديث قاعدة الأتمتة: "${ruleData.name}"`);
     }
+    
+    const rules = await Rule.find();
+    const plainRules = rules.map(r => {
+      const obj = r.toObject();
+      obj.id = r._id.toString();
+      return obj;
+    });
+    
+    res.json({ success: true, rules: plainRules });
+  } catch (err) {
+    addLog('danger', `خطأ في حفظ القاعدة: ${err.message}`);
+    res.status(500).json({ error: err.message });
   }
-  saveData(data);
-  res.json({ success: true, rules: data.rules });
 });
 
 // Delete Rule
-app.delete('/api/rules/:id', (req, res) => {
-  const data = loadData();
-  const ruleId = req.params.id;
-  const rule = data.rules.find(r => r.id === ruleId);
-  if (rule) {
-    data.rules = data.rules.filter(r => r.id !== ruleId);
-    saveData(data);
-    addLog('system', `تم حذف قاعدة الأتمتة بنجاح: "${rule.name}"`);
-    res.json({ success: true, rules: data.rules });
-  } else {
-    res.status(404).json({ error: 'Rule not found' });
+app.delete('/api/rules/:id', authenticateToken, async (req, res) => {
+  try {
+    const ruleId = req.params.id;
+    
+    // Check if it's a legacy fake ID or a valid ObjectId
+    let rule;
+    if (ruleId.startsWith('rule_')) {
+      // For legacy rules stored in file, we might not find them in DB by ID.
+      // But we are moving to DB, so we should expect them to be in DB now if they were created there.
+      // Let's try to find by name or just find by ID if it's a valid ObjectId.
+      // If it starts with 'rule_', it's definitely not a valid ObjectId.
+      // Let's try to delete by the 'name' or just delete by ID if we can.
+      
+      // Better approach: Since we are moving to DB, let's assume all rules are in DB now.
+      // If the frontend sends 'rule_1', it might fail to find it by ID.
+      // Let's try to find it by name if it's not a valid ObjectId?
+      // Or just return 404 if not found.
+      
+      rule = await Rule.findOne({ id: ruleId }); // If we added an 'id' field in schema (we didn't).
+    }
+    
+    // Let's try to find by ID assuming it might be a valid ObjectId now.
+    try {
+      rule = await Rule.findById(ruleId);
+    } catch (e) {
+      // Invalid ObjectId
+    }
+
+    if (rule) {
+      await Rule.findByIdAndDelete(rule._id);
+      addLog('system', `تم حذف قاعدة الأتمتة بنجاح: "${rule.name}"`);
+      
+      const rules = await Rule.find();
+      const plainRules = rules.map(r => {
+        const obj = r.toObject();
+        obj.id = r._id.toString();
+        return obj;
+      });
+      res.json({ success: true, rules: plainRules });
+    } else {
+      res.status(404).json({ error: 'Rule not found' });
+    }
+  } catch (err) {
+    addLog('danger', `خطأ في حذف القاعدة: ${err.message}`);
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -1519,7 +1548,7 @@ app.post('/api/trigger', authenticateToken, async (req, res) => {
     addLog('info', 'تم تحفيز فحص القواعد الإعلانية يدوياً من لوحة التحكم.');
     await runAutomation();
     const activeAccId = req.body.accountId || '26739674035671488';
-    res.json({ success: true, logs: loadLogs(), mockCampaigns: mockCampaignsByAccount[activeAccId] });
+    res.json({ success: true, logs: await loadLogs(), mockCampaigns: mockCampaignsByAccount[activeAccId] });
   } catch (err) {
     addLog('danger', `خطأ في الفحص اليدوي المباشر: ${err.message}`);
     res.status(500).json({ error: err.message });
@@ -1527,40 +1556,50 @@ app.post('/api/trigger', authenticateToken, async (req, res) => {
 });
 
 // Get Live Logs
-app.get('/api/logs', (req, res) => {
-  const logs = loadLogs();
+app.get('/api/logs', async (req, res) => {
+  const logs = await loadLogs();
   res.json(logs);
 });
 
 // Clear Logs
-app.post('/api/logs/clear', (req, res) => {
-  const emptyLogs = [{
-    timestamp: new Date().toISOString(),
-    type: 'system',
-    message: 'تم تفريغ السجل والبدء من جديد.'
-  }];
-  fs.writeFileSync(LOGS_FILE, JSON.stringify(emptyLogs, null, 2), 'utf-8');
-  res.json(emptyLogs);
+app.post('/api/logs/clear', async (req, res) => {
+  try {
+    await Log.deleteMany({});
+    const emptyLogs = [{
+      timestamp: new Date().toISOString(),
+      type: 'system',
+      message: 'تم تفريغ السجل والبدء من جديد.'
+    }];
+    await Log.create(emptyLogs[0]);
+    res.json(emptyLogs);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // GET: Retrieve all leads
-app.get('/api/leads', authenticateToken, (req, res) => {
+app.get('/api/leads', authenticateToken, async (req, res) => {
   try {
     const region = req.query.region || 'EG';
-    let leads = loadLeads();
+    const dbLeads = await Lead.find().sort({ timestamp: -1 });
+    let leads = dbLeads.map(l => {
+      const obj = l.toObject();
+      obj.id = l._id.toString();
+      return obj;
+    });
     
     // Filter or Map to Regional Leads if needed for simulation
     if (region === 'SA') {
       leads = leads.map(l => ({
         ...l,
-        name: l.name.replace('أحمد محمود', 'سعد الشهري').replace('كريم عبد العزيز', 'فهد الدوسري').replace('مي الشافعي', 'نورة العتيبي'),
-        phone: l.phone.startsWith('+20') ? l.phone.replace('+20', '+966') : l.phone
+        name: l.name ? l.name.replace('أحمد محمود', 'سعد الشهري').replace('كريم عبد العزيز', 'فهد الدوسري').replace('مي الشافعي', 'نورة العتيبي') : '',
+        phone: l.phone && l.phone.startsWith('+20') ? l.phone.replace('+20', '+966') : l.phone
       }));
     } else if (region === 'AE') {
       leads = leads.map(l => ({
         ...l,
-        name: l.name.replace('أحمد محمود', 'راشد المكتوم').replace('كريم عبد العزيز', 'سيف بن زايد').replace('مي الشافعي', 'ريم الهاشمي'),
-        phone: l.phone.startsWith('+20') ? l.phone.replace('+20', '+971') : l.phone
+        name: l.name ? l.name.replace('أحمد محمود', 'راشد المكتوم').replace('كريم عبد العزيز', 'سيف بن زايد').replace('مي الشافعي', 'ريم الهاشمي') : '',
+        phone: l.phone && l.phone.startsWith('+20') ? l.phone.replace('+20', '+971') : l.phone
       }));
     }
     
@@ -1581,26 +1620,11 @@ app.post('/api/leads', async (req, res) => {
     // Save to MongoDB
     const dbLead = await Lead.create({ name, phone, email: email || '', product, brand });
     
-    const leads = loadLeads();
-    const newLead = {
-      id: dbLead._id.toString(),
-      name,
-      phone,
-      email: email || '',
-      product,
-      brand,
-      timestamp: dbLead.timestamp,
-      status: dbLead.status
-    };
-
-    leads.unshift(newLead); // Add to top
-    saveLeads(leads);
-
     await addLog('success', `📥 [عميل جديد]: تم استلام عميل محتمل لـ ${brand}: ${name} (${phone}) مهتم بـ "${product}"`);
     await addLog('success', `📱 [واتساب تلقائي]: تم إرسال رسالة ترحيبية آلية لـ ${name} بنجاح لتسريع عملية البيع.`);
 
     // Fetch telegram settings and fire alert
-    const settings = loadData().settings;
+    const { settings } = await loadData();
     if (settings.telegramBotToken && settings.telegramChatId) {
       const message = `📥 <b>عميل محتمل جديد! (New Lead) - MetaFlow AI</b>\n\n` +
                       `🏢 <b>العلامة التجارية:</b> <code>${brand}</code>\n` +
@@ -1616,11 +1640,19 @@ app.post('/api/leads', async (req, res) => {
       ];
       await sendTelegramMessage(settings.telegramBotToken, settings.telegramChatId, message, inlineButtons);
     }
+    
     if (settings.notificationEmail) {
       await sendEmailNotification(settings.notificationEmail, `عميل محتمل جديد - ${brand}`, `<h2 style="color:#00ffaa;">عميل جديد لـ ${brand}!</h2><p><b>الاسم:</b> ${name} | <b>الهاتف:</b> ${phone}</p><p><b>المنتج:</b> ${product}</p>`);
     }
 
-    res.json({ success: true, leads, lead: newLead }); // Return full leads list for frontend update
+    const allLeads = await Lead.find().sort({ timestamp: -1 });
+    const plainLeads = allLeads.map(l => {
+      const obj = l.toObject();
+      obj.id = l._id.toString();
+      return obj;
+    });
+    
+    res.json({ success: true, leads: plainLeads, lead: dbLead });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1714,27 +1746,17 @@ app.post('/api/leads/status', (req, res) => {
   }
 });
 
-// --- Setup Server-Side Automatic Cron-Jobs ---
-let automationCron = null;
-
-function setupCronJob(intervalMinutes) {
-  if (automationCron) {
-    automationCron.stop();
+// Route for Vercel Cron to trigger automation
+app.get('/api/cron', async (req, res) => {
+  try {
+    addLog('info', 'تم تحفيز الفحص الآلي المستمر عبر Vercel Cron.');
+    await runAutomation();
+    res.json({ success: true, message: 'Automation run successfully' });
+  } catch (err) {
+    addLog('danger', `خطأ في الفحص الآلي المستمر: ${err.message}`);
+    res.status(500).json({ error: err.message });
   }
-  
-  const minutes = parseInt(intervalMinutes) || 30;
-  const cronExpression = `*/${minutes} * * * *`;
-  
-  addLog('system', `تمت جدولة الفحص الآلي المستمر ليعمل كل ${minutes} دقيقة بنجاح.`);
-  
-  automationCron = cron.schedule(cronExpression, async () => {
-    try {
-      await runAutomation();
-    } catch (err) {
-      console.error('Error running scheduled automation cron:', err.message);
-    }
-  });
-}
+});
 
 // Serve Frontend Bundle in Production Environment
 const frontendDist = path.join(__dirname, 'dist');
@@ -1767,8 +1789,8 @@ app.listen(PORT, async () => {
     console.error('❌ [AUTH] Failed to check/create admin user:', err.message);
   }
 
-  const data = loadData();
-  loadLogs();
+  const data = await loadData();
+  await loadLogs();
   
   // Validate and Fetch Initial Real Data
   if (data.settings.metaAccessToken && data.settings.metaAdAccountId) {
@@ -1796,7 +1818,7 @@ app.listen(PORT, async () => {
   } else {
     console.log('📊 [STARTUP] Google Sheets Sync: NOT CONFIGURED');
   }
-
-  setupCronJob(parseInt(data.settings.checkInterval) || 30);
 });
+
+export default app;
 
